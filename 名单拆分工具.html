@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>商家ID白名单拆分工具</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f0; color: #1a1a1a; min-height: 100vh; display: flex; justify-content: center; padding: 2rem 1rem; }
+  .card { background: #fff; border-radius: 16px; padding: 2rem; width: 100%; max-width: 640px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); height: fit-content; }
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 1.5rem; color: #111; }
+  .upload-zone { border: 2px dashed #ccc; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; background: #fafafa; transition: border-color 0.2s, background 0.2s; }
+  .upload-zone:hover { border-color: #378ADD; background: #f0f7ff; }
+  .upload-zone.success { border-color: #1D9E75; background: #f0fdf8; }
+  .upload-zone .icon { font-size: 36px; margin-bottom: 0.5rem; }
+  .upload-zone p { color: #555; font-size: 14px; margin-top: 4px; }
+  .upload-zone strong { color: #111; font-size: 15px; }
+  .section { margin-top: 1.25rem; }
+  label { font-size: 13px; color: #666; display: block; margin-bottom: 6px; }
+  select, input[type=number], input[type=text] { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+  select:focus, input:focus { border-color: #378ADD; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 1.25rem; }
+  .stat { background: #f5f5f0; border-radius: 10px; padding: 0.75rem 1rem; text-align: center; }
+  .stat p { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .stat strong { font-size: 20px; font-weight: 600; }
+  .file-list { border: 1px solid #eee; border-radius: 10px; overflow: hidden; margin-top: 1.25rem; max-height: 280px; overflow-y: auto; }
+  .file-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #f0f0f0; font-size: 13px; color: #333; }
+  .file-row:last-child { border-bottom: none; }
+  .file-row span { color: #999; }
+  .btn { width: 100%; padding: 11px; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 1rem; transition: opacity 0.2s, transform 0.1s; }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: #378ADD; color: #fff; }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-primary:disabled { background: #aaa; cursor: not-allowed; }
+  .btn-secondary { background: #f0f0f0; color: #333; font-weight: 500; }
+  .progress { margin-top: 1rem; }
+  .progress-bar-wrap { background: #eee; border-radius: 99px; height: 6px; overflow: hidden; }
+  .progress-bar { height: 100%; width: 0%; background: #378ADD; border-radius: 99px; transition: width 0.2s; }
+  .progress p { font-size: 13px; color: #888; text-align: center; margin-top: 6px; }
+  .err { background: #fff0f0; color: #c0392b; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 1rem; display: none; }
+  .hint { font-size: 12px; color: #aaa; text-align: center; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📂 商家ID白名单拆分工具</h1>
+
+  <div class="upload-zone" id="uz" onclick="document.getElementById('fi').click()" ondragover="ev(event)" ondrop="dp(event)">
+    <div class="icon">📊</div>
+    <strong id="uz-label">点击上传 或 拖拽文件到此处</strong>
+    <p>支持 .xlsx / .xls / .csv 格式</p>
+  </div>
+  <input type="file" id="fi" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFile(this.files[0])">
+
+  <div id="err" class="err"></div>
+
+  <div id="col-sec" class="section" style="display:none">
+    <label>选择商家ID所在列</label>
+    <div style="display:flex;gap:10px;">
+      <select id="col-sel" style="flex:1"></select>
+      <button class="btn btn-secondary" style="width:auto;margin:0;padding:8px 18px;" onclick="loadCol()">确认 →</button>
+    </div>
+    <p id="col-hint" style="font-size:12px;color:#aaa;margin-top:6px;"></p>
+  </div>
+
+  <div id="cfg-sec" class="section" style="display:none">
+    <div class="row">
+      <div>
+        <label>每个文件最多条数</label>
+        <input type="number" id="chunk" value="5000" min="1">
+      </div>
+      <div>
+        <label>文件名前缀</label>
+        <input type="text" id="prefix" value="whitelist">
+      </div>
+    </div>
+  </div>
+
+  <div id="stats-sec" class="stats" style="display:none">
+    <div class="stat"><p>总ID数</p><strong id="s-total">—</strong></div>
+    <div class="stat"><p>去重后</p><strong id="s-dedup">—</strong></div>
+    <div class="stat"><p>将生成文件</p><strong id="s-files">—</strong></div>
+  </div>
+
+  <div id="list-sec" style="display:none">
+    <div class="file-list" id="file-list"></div>
+    <button class="btn btn-secondary" onclick="recalc()" style="margin-top:10px;">重新预览</button>
+    <button class="btn btn-primary" id="dl-btn" onclick="doDownload()">⬇ 打包下载全部 txt（zip）</button>
+  </div>
+
+  <div id="prog" class="progress" style="display:none">
+    <div class="progress-bar-wrap"><div class="progress-bar" id="pbar"></div></div>
+    <p id="ptxt"></p>
+  </div>
+
+  <p class="hint">本工具完全在本地运行，数据不会上传到任何服务器</p>
+</div>
+
+<script>
+var wb = null, allIds = [], dedupIds = [];
+
+function ev(e) { e.preventDefault(); }
+function dp(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }
+
+function setErr(m) { var el = document.getElementById('err'); el.textContent = m; el.style.display = m ? 'block' : 'none'; }
+
+function handleFile(file) {
+  setErr('');
+  var r = new FileReader();
+  r.onload = function(e) {
+    try {
+      wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellText: false, cellDates: false });
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var range = XLSX.utils.decode_range(sheet['!ref']);
+      var sel = document.getElementById('col-sel');
+      sel.innerHTML = '';
+      for (var c = range.s.c; c <= range.e.c; c++) {
+        var hc = sheet[XLSX.utils.encode_cell({ r: range.s.r, c: c })];
+        var sc = sheet[XLSX.utils.encode_cell({ r: range.s.r + 1, c: c })];
+        var opt = document.createElement('option');
+        opt.value = c;
+        var lbl = hc ? String(hc.v) : ('列' + (c + 1));
+        var smp = sc ? String(sc.v) : '';
+        opt.textContent = lbl + (smp ? '（示例：' + smp + '）' : '');
+        sel.appendChild(opt);
+      }
+      document.getElementById('col-hint').textContent = '共 ' + (range.e.c - range.s.c + 1) + ' 列，请选择商家ID所在列';
+      document.getElementById('uz-label').textContent = '✅ 已加载：' + file.name;
+      document.getElementById('uz').className = 'upload-zone success';
+      document.getElementById('col-sec').style.display = 'block';
+    } catch(ex) { setErr('解析失败：' + ex.message); }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+function loadCol() {
+  setErr('');
+  var colIdx = parseInt(document.getElementById('col-sel').value);
+  var sheet = wb.Sheets[wb.SheetNames[0]];
+  var range = XLSX.utils.decode_range(sheet['!ref']);
+  allIds = [];
+  for (var row = range.s.r + 1; row <= range.e.r; row++) {
+    var cell = sheet[XLSX.utils.encode_cell({ r: row, c: colIdx })];
+    if (cell && cell.v != null && String(cell.v).trim() !== '') {
+      var v = String(cell.v).trim();
+      if (cell.t === 'n' && cell.w) v = cell.w.replace(/,/g, '');
+      allIds.push(v);
+    }
+  }
+  if (!allIds.length) { setErr('该列没有数据，请换一列试试。'); return; }
+  dedupIds = Array.from(new Set(allIds));
+  recalc();
+}
+
+function recalc() {
+  if (!dedupIds.length) return;
+  var cs = parseInt(document.getElementById('chunk').value) || 5000;
+  var pf = document.getElementById('prefix').value.trim() || 'whitelist';
+  var total = Math.ceil(dedupIds.length / cs);
+  var pad = String(total).length;
+
+  document.getElementById('s-total').textContent = allIds.length.toLocaleString();
+  document.getElementById('s-dedup').textContent = dedupIds.length.toLocaleString();
+  document.getElementById('s-files').textContent = total;
+
+  var listEl = document.getElementById('file-list');
+  listEl.innerHTML = '';
+  for (var i = 0; i < total; i++) {
+    var cnt = Math.min(cs, dedupIds.length - i * cs);
+    var fname = pf + '_' + String(i + 1).padStart(pad, '0') + '.txt';
+    var row = document.createElement('div');
+    row.className = 'file-row';
+    row.innerHTML = '<span>📄 ' + fname + '</span><span>' + cnt.toLocaleString() + ' 条</span>';
+    listEl.appendChild(row);
+  }
+
+  document.getElementById('cfg-sec').style.display = 'block';
+  document.getElementById('stats-sec').style.display = 'grid';
+  document.getElementById('list-sec').style.display = 'block';
+  document.getElementById('prog').style.display = 'none';
+}
+
+async function doDownload() {
+  var cs = parseInt(document.getElementById('chunk').value) || 5000;
+  var pf = document.getElementById('prefix').value.trim() || 'whitelist';
+  var total = Math.ceil(dedupIds.length / cs);
+  var pad = String(total).length;
+
+  var btn = document.getElementById('dl-btn');
+  btn.disabled = true;
+  document.getElementById('prog').style.display = 'block';
+  var bar = document.getElementById('pbar');
+  var ptxt = document.getElementById('ptxt');
+
+  var zip = new JSZip();
+  for (var i = 0; i < total; i++) {
+    var chunk = dedupIds.slice(i * cs, (i + 1) * cs);
+    var fname = pf + '_' + String(i + 1).padStart(pad, '0') + '.txt';
+    zip.file(fname, chunk.join('\n'));
+    bar.style.width = Math.round(((i + 1) / total) * 80) + '%';
+    ptxt.textContent = '正在生成 ' + (i + 1) + ' / ' + total + '…';
+    await new Promise(function(r) { setTimeout(r, 0); });
+  }
+
+  ptxt.textContent = '正在压缩打包…';
+  var blob = await zip.generateAsync({ type: 'blob' }, function(meta) {
+    bar.style.width = (80 + meta.percent * 0.2).toFixed(0) + '%';
+  });
+
+  bar.style.width = '100%';
+  ptxt.textContent = '完成！正在下载…';
+
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = pf + '_split.zip';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+
+  setTimeout(function() {
+    btn.disabled = false;
+    ptxt.textContent = '下载完成 ✅';
+  }, 1000);
+}
+</script>
+</body>
+</html>
